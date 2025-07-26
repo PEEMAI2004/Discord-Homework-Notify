@@ -26,10 +26,10 @@ def google_calendar_service():
             creds = service_account.Credentials.from_service_account_file(
                 GOOGLE_CREDENTIALS, scopes=SCOPES
             )
-            print("Service account credentials loaded from", GOOGLE_CREDENTIALS)
+            print("✅ Service account credentials loaded from", GOOGLE_CREDENTIALS)
             return build('calendar', 'v3', credentials=creds)
         except Exception as e:
-            print("Failed to load service account credentials:", e)
+            print("❌ Failed to load service account credentials:", e)
     else:
         # Try user token
         if os.path.exists(Token_Path):
@@ -37,14 +37,14 @@ def google_calendar_service():
                 creds = Credentials.from_authorized_user_file(Token_Path, SCOPES)
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
-                    print("Access token refreshed.")
+                    print("🔄 Access token refreshed.")
                 if creds and creds.valid:
-                    print("Token loaded successfully from user credentials at", Token_Path)
+                    print("✅ Token loaded successfully from user credentials at", Token_Path)
                     return build('calendar', 'v3', credentials=creds)
                 else:
-                    print("Token is invalid or expired without refresh token.")
+                    print("❌ Token is invalid or expired without refresh token.")
             except Exception as e:
-                print("Failed to load user token:", e)
+                print("❌ Failed to load user token:", e)
 
         # Final fallback — prompt user login
         print("🔓 Prompting for manual authentication...")
