@@ -1,6 +1,8 @@
 import requests
 import datetime
 import os
+import time
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -24,10 +26,10 @@ def google_calendar_service():
             creds = service_account.Credentials.from_service_account_file(
                 GOOGLE_CREDENTIALS, scopes=SCOPES
             )
-            print("✅ Service account credentials loaded from", GOOGLE_CREDENTIALS)
+            print("Service account credentials loaded from", GOOGLE_CREDENTIALS)
             return build('calendar', 'v3', credentials=creds)
         except Exception as e:
-            print("❌ Failed to load service account credentials:", e)
+            print("Failed to load service account credentials:", e)
     else:
         # Try user token
         if os.path.exists(Token_Path):
@@ -35,14 +37,14 @@ def google_calendar_service():
                 creds = Credentials.from_authorized_user_file(Token_Path, SCOPES)
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
-                    print("🔄 Access token refreshed.")
+                    print("Access token refreshed.")
                 if creds and creds.valid:
-                    print("✅ Token loaded successfully from user credentials at", Token_Path)
+                    print("Token loaded successfully from user credentials at", Token_Path)
                     return build('calendar', 'v3', credentials=creds)
                 else:
-                    print("❌ Token is invalid or expired without refresh token.")
+                    print("Token is invalid or expired without refresh token.")
             except Exception as e:
-                print("❌ Failed to load user token:", e)
+                print("Failed to load user token:", e)
 
         # Final fallback — prompt user login
         print("🔓 Prompting for manual authentication...")
@@ -93,48 +95,56 @@ def add_or_update_event(service, calendar_id, title, start, end, class_id, activ
         service.events().insert(calendarId=calendar_id, body=event).execute()
         print(f"➕ Created: {title}")
 
-# Load headers from environment variables
-headers = {
-    "x-csrf-token": os.getenv("CSRF_TOKEN"),
-    "x-requested-with": "XMLHttpRequest",
-    "accept": "application/json",
-    "cookie": os.getenv("COOKIE")
-}
+def load_class_info():
+    """Load class information from environment variables."""
+    class_info_str = os.getenv("CLASS_INFO")
+    class_names = {}
 
-# Load class information from environment variables
-class_info_str = os.getenv("CLASS_INFO")
-class_names = {}
+    if class_info_str:
+        class_info_parts = class_info_str.split(',')
+        # Process pairs of id and name
+        for i in range(0, len(class_info_parts), 2):
+            if i + 1 < len(class_info_parts):
+                try:
+                    class_id = int(class_info_parts[i])
+                    class_name = class_info_parts[i + 1]
+                    class_names[class_id] = class_name
+                except ValueError:
+                    print(f"❌ Invalid class ID format: {class_info_parts[i]}")
+    else:
+        print("❌ CLASS_INFO not found in environment variables")
+        exit(1)
 
-# Parse the class info from format: id,name,id,name,...
-if class_info_str:
-    class_info_parts = class_info_str.split(',')
-    # Process pairs of id and name
-    for i in range(0, len(class_info_parts), 2):
-        if i + 1 < len(class_info_parts):
-            try:
-                class_id = int(class_info_parts[i])
-                class_name = class_info_parts[i + 1]
-                class_names[class_id] = class_name
-            except ValueError:
-                print(f"❌ Invalid class ID format: {class_info_parts[i]}")
-else:
-    print("❌ CLASS_INFO not found in environment variables")
-    exit(1)
+    print(f"📋 Loaded {len(class_names)} classes from environment variables")
+    return class_names
 
-# Debug output
-print(f"📋 Loaded {len(class_names)} classes from environment variables")
-# get class id from class name
-class_ids = list(class_names.keys())
+def get_headers():
+    """Load headers from environment variables."""
+    return {
+        "x-csrf-token": os.getenv("CSRF_TOKEN"),
+        "x-requested-with": "XMLHttpRequest",
+        "accept": "application/json",
+        "cookie": os.getenv("COOKIE")
+    }
 
-# Get student ID from environment variables
-student_id = os.getenv("STUDENT_ID")
-if not student_id:
-    print("❌ STUDENT_ID not found in environment variables")
-    exit(1)
+def get_student_id():
+    """Get student ID from environment variables."""
+    student_id = os.getenv("STUDENT_ID")
+    if not student_id:
+        print("❌ STUDENT_ID not found in environment variables")
+        exit(1)
+    return student_id
 
-calendar_service = google_calendar_service()
+def get_activities_url():
+    """Get activities URL from environment variables."""
+    activities_url = os.getenv("ACTIVITIES_URL")
+    if not activities_url:
+        print("❌ ACTIVITIES_URL not found in environment variables")
+        exit(1)
+    return activities_url
 
-for class_id in class_ids:
+def fetch_activities(class_id, student_id, headers, activities_url):
+    """Fetch activities for a specific class."""
     print(f"\n📦 Fetching activities for class_id: {class_id}")
     
     params = {
@@ -149,12 +159,6 @@ for class_id in class_ids:
         ],
         "includes[]": ["user:sideload", "fileactivities:ids", "questions:ids"]
     }
-
-    # Get activities URL from environment variables
-    activities_url = os.getenv("ACTIVITIES_URL")
-    if not activities_url:
-        print("❌ ACTIVITIES_URL not found in environment variables")
-        exit(1)
         
     response = requests.get(
         activities_url,
@@ -163,24 +167,44 @@ for class_id in class_ids:
     )
 
     if response.status_code == 200:
-        data = response.json()
-        activities = data.get("activities", [])
-        for activity in activities:
-            title = activity.get("title", "Untitled")
-
-            class_name = class_names.get(class_id, "Unknown Class")
-            
-            activity_id = activity.get("id", "Unknown ID")
-            
-            title = f"{class_name} - {title}"
-            start_date = activity.get("start_date")
-            due_date = activity.get("due_date")
-
-            if start_date and due_date:
-                start = datetime.datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S").isoformat()
-                end = datetime.datetime.strptime(due_date, "%Y-%m-%d %H:%M:%S").isoformat()
-
-                add_or_update_event(calendar_service, calendar_id, title, start, end, class_id, activity_id)
+        return response.json().get("activities", [])
     else:
-        print("❌ Failed to fetch activities:", response.status_code)
+        print(f"❌ Failed to fetch activities: {response.status_code}")
+        return []
+
+def process_activities(activities, class_id, class_name, calendar_service, calendar_id):
+    """Process activities and add/update calendar events."""
+    for activity in activities:
+        title = activity.get("title", "Untitled")
+        activity_id = activity.get("id", "Unknown ID")
+        
+        title = f"{class_name} - {title}"
+        start_date = activity.get("start_date")
+        due_date = activity.get("due_date")
+
+        if start_date and due_date:
+            start = datetime.datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S").isoformat()
+            end = datetime.datetime.strptime(due_date, "%Y-%m-%d %H:%M:%S").isoformat()
+
+            add_or_update_event(calendar_service, calendar_id, title, start, end, class_id, activity_id)
+
+def main():
+    # Load data from environment variables
+    headers = get_headers()
+    class_names = load_class_info()
+    class_ids = list(class_names.keys())
+    student_id = get_student_id()
+    activities_url = get_activities_url()
     
+    # Initialize Google Calendar service
+    calendar_service = google_calendar_service()
+
+    # Process each class
+    for class_id in class_ids:
+        activities = fetch_activities(class_id, student_id, headers, activities_url)
+        class_name = class_names.get(class_id, "Unknown Class")
+        process_activities(activities, class_id, class_name, calendar_service, calendar_id)
+        time.sleep(5)
+
+if __name__ == "__main__":
+    main()
