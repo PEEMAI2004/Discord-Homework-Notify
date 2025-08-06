@@ -188,7 +188,7 @@ def process_activities(activities, class_id, class_name, calendar_service, calen
 
             add_or_update_event(calendar_service, calendar_id, title, start, end, class_id, activity_id)
 
-def main():
+def get_activities():
     # Load data from environment variables
     headers = get_headers()
     class_names = load_class_info()
@@ -207,4 +207,4 @@ def main():
         time.sleep(5)
 
 if __name__ == "__main__":
-    main()
+    get_activities()

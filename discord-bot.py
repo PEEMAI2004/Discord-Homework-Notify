@@ -7,6 +7,7 @@ from gcsa.google_calendar import GoogleCalendar
 from dotenv import load_dotenv
 import os
 from zoneinfo import ZoneInfo
+from api_bot import get_activities
 
 # Load environment variables
 load_dotenv()
@@ -65,6 +66,47 @@ async def format_and_send_event(event, now, channel):
             f"⏳ **Time Until End:** {time_until_str}\n"
             f"🔗 [Link to Activity](<{activity_link}>)\n"
         )
+        await channel.send(msg)
+        await asyncio.sleep(1)  # Avoid rate limits
+    except Exception as e:
+        print(f"❌ Error sending event '{event.summary}': {e}")
+
+async def format_and_send_events(events, now, channel):
+    try:
+        bangkok_tz = ZoneInfo("Asia/Bangkok")
+        msg = "## Activities\n\n"
+        for event in events:
+            event_end = event.end.astimezone(bangkok_tz) if event.end else None
+            event_time = event_end.strftime('%B %d, %Y at %I:%M %p') if event_end else "All day"
+
+            if event_end:
+                time_until = event_end - now.astimezone(bangkok_tz)
+                total_seconds = time_until.total_seconds()
+
+                if total_seconds > 0:
+                    days, remainder = divmod(total_seconds, 86400)
+                    hours, remainder = divmod(remainder, 3600)
+                    minutes = remainder // 60
+                    time_until_str = f"{int(days)} days, {int(hours)} hours, and {int(minutes)} minutes"
+                else:
+                    time_until_str = "Already ended"
+            else:
+                time_until_str = "N/A"
+                
+            description = event.description if hasattr(event, 'description') else "No description available"
+            class_id = description.split(",")[0] if description else "Unknown Class"
+            activity_id = description.split(",")[1] if len(description.split(",")) > 1 else "Unknown Activity"
+            # link to the event
+            baselink = os.getenv("BASE_SITE_URL").rstrip('/')
+            activity_link = f"{baselink}/{class_id}/activity/{activity_id}"
+            
+             msg += (
+                f"### {event.summary}\n"
+                f"📆 **Ends At:** {event_time}\n"
+                f"⏳ **Time Until End:** {time_until_str}\n"
+                f"🔗 [Link to Activity](<{activity_link}>)\n"
+            )
+        
         await channel.send(msg)
         await asyncio.sleep(1)  # Avoid rate limits
     except Exception as e:
@@ -137,8 +179,9 @@ async def send_event_notifications():
                 continue
 
             print(f"📡 Sending {len(upcoming_events)} event(s) for calendar {calendar_id} to channel {channel.name} ({channel_id})")
-            for event in upcoming_events:
-                await format_and_send_event(event, now, channel)
+            # for event in upcoming_events:
+            #     await format_and_send_event(event, now, channel)
+            await format_and_send_events(upcoming_events, now, channel)
 
         except Exception as e:
             print(f"❌ Error processing calendar {calendar_id}: {e}")
@@ -147,11 +190,13 @@ async def send_event_notifications():
 @tasks.loop(time=dtime(9, 0))
 async def check_calendar():
     # await send_event_notifications_today()
+    get_activities()
     await send_event_notifications()
 
 # On bot ready
 @client.event
 async def on_ready():
+    get_activities()
     print(f"✅ Logged in as {client.user}")
     if not check_calendar.is_running():
         check_calendar.start()
