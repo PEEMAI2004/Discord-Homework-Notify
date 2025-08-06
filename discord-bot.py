@@ -100,7 +100,7 @@ async def format_and_send_events(events, now, channel):
             baselink = os.getenv("BASE_SITE_URL").rstrip('/')
             activity_link = f"{baselink}/{class_id}/activity/{activity_id}"
             
-             msg += (
+            msg += (
                 f"### {event.summary}\n"
                 f"📆 **Ends At:** {event_time}\n"
                 f"⏳ **Time Until End:** {time_until_str}\n"
