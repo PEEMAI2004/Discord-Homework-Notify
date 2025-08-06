@@ -100,12 +100,21 @@ async def format_and_send_events(events, now, channel):
             baselink = os.getenv("BASE_SITE_URL").rstrip('/')
             activity_link = f"{baselink}/{class_id}/activity/{activity_id}"
             
+            msg_check_point = msg
             msg += (
                 f"### {event.summary}\n"
                 f"📆 **Ends At:** {event_time}\n"
                 f"⏳ **Time Until End:** {time_until_str}\n"
                 f"🔗 [Link to Activity](<{activity_link}>)\n"
             )
+            if len(msg) > 2000:  # Discord message limit
+                await channel.send(msg_check_point)
+                msg = (
+                f"### {event.summary}\n"
+                f"📆 **Ends At:** {event_time}\n"
+                f"⏳ **Time Until End:** {time_until_str}\n"
+                f"🔗 [Link to Activity](<{activity_link}>)\n"
+                )
         
         await channel.send(msg)
         await asyncio.sleep(1)  # Avoid rate limits
