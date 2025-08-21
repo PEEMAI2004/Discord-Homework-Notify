@@ -75,6 +75,9 @@ async def format_and_send_events(events, now, channel):
     try:
         bangkok_tz = ZoneInfo("Asia/Bangkok")
         msg = "## Activities\n\n"
+        # Sort events by end time
+        events.sort(key=lambda e: e.end.astimezone(bangkok_tz) if e.end else datetime.datetime.max)
+        # Iterate through sorted events
         for event in events:
             event_end = event.end.astimezone(bangkok_tz) if event.end else None
             event_time = event_end.strftime('%B %d, %Y at %I:%M %p') if event_end else "All day"
@@ -210,7 +213,7 @@ async def on_ready():
     if not check_calendar.is_running():
         check_calendar.start()
     
-    await send_event_notifications()  # Send notifications immediately on startup for testing
+    # await send_event_notifications()  # Send notifications immediately on startup for testing
     await asyncio.sleep(1)
 
 # Run the bot
