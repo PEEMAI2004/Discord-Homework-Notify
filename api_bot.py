@@ -180,7 +180,15 @@ def process_activities(activities, class_id, class_name, calendar_service, calen
         
         title = f"{class_name} - {title}"
         start_date = activity.get("start_date")
-        due_date = activity.get("due_date")
+        due_date = activity.get("due_date") or None
+
+        # Fallback: if due_date is missing/null, use END_OF_SEMESTER from env (YYYY-MM-DD)
+        if not due_date:
+            end_of_semester = os.getenv("END_OF_SEMESTER")
+            if end_of_semester:
+                # Use end of day to represent due date when only date is provided
+                due_date = f"{end_of_semester} 23:59:59"
+                print(f"ℹ️  Missing due_date for activity {activity_id}; defaulting to END_OF_SEMESTER {due_date}")
 
         if start_date and due_date:
             start = datetime.datetime.strptime(start_date, "%Y-%m-%d %H:%M:%S").isoformat()
