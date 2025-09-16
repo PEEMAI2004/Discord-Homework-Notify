@@ -37,6 +37,8 @@ BANGKOK_TZ = ZoneInfo("Asia/Bangkok")
 DISCORD_MESSAGE_LIMIT = 2000
 # Track previously-sent message IDs per channel to delete cleanly next run
 _PREV_MESSAGE_IDS = {}
+# Track which events we've already notified about for end-time alerts
+_NOTIFIED_END_ALERTS = {}
 
 
 def _safe_event_end_in_bkk(event):
@@ -171,6 +173,108 @@ async def format_and_send_events(events, now, channel):
         print(f"❌ Error sending events for channel {ch}: {e}")
 
 
+def _cleanup_notified(now_bkk):
+    """Remove stale notification keys whose end time has passed."""
+    try:
+        stale = [k for k, ts in _NOTIFIED_END_ALERTS.items() if ts <= int(now_bkk.timestamp())]
+        for k in stale:
+            _NOTIFIED_END_ALERTS.pop(k, None)
+    except Exception:
+        pass
+
+
+def _make_notification_key(calendar_id, event, end_bkk, hours):
+    eid = getattr(event, "event_id", None) or getattr(event, "id", None)
+    if not eid:
+        # Fallback to a composite based on summary and end timestamp
+        eid = f"{getattr(event, 'summary', 'Untitled')}:{int(end_bkk.timestamp())}"
+    return f"{calendar_id}:{eid}:{hours}"
+
+
+async def notify_before_event_end(hours):
+    """Notify about events that end within the next `hours` hours.
+
+    Aggregates events per channel and sends a concise list.
+    Deduplicates notifications using in-memory keys across invocations.
+    """
+    if hours is None or hours <= 0:
+        print("⚠️ notify_before_event_end called with non-positive hours; skipping")
+        return
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_bkk = now_utc.astimezone(BANGKOK_TZ)
+    _cleanup_notified(now_bkk)
+
+    window_seconds = int(hours * 3600)
+
+    # Collect events per channel
+    per_channel = {}
+    per_channel_keys = {}
+
+    for calendar_id, channel_id in CALENDAR_MAP.items():
+        try:
+            gc = GoogleCalendar(calendar_id, credentials_path=GOOGLE_CREDENTIALS)
+            events = list(gc.get_events(time_min=now_utc))
+        except Exception as e:
+            print(f"❌ Error fetching events for calendar {calendar_id}: {e}")
+            continue
+
+        for event in events:
+            try:
+                end_bkk = _safe_event_end_in_bkk(event)
+                if not end_bkk:
+                    continue
+                delta = end_bkk - now_bkk
+                seconds = int(delta.total_seconds())
+                if seconds <= 0 or seconds > window_seconds:
+                    continue
+
+                key = _make_notification_key(calendar_id, event, end_bkk, hours)
+                if key in _NOTIFIED_END_ALERTS:
+                    continue
+
+                per_channel.setdefault(channel_id, []).append((event, end_bkk))
+                per_channel_keys.setdefault(channel_id, []).append((key, int(end_bkk.timestamp())))
+            except Exception as e:
+                print(f"⚠️ Skipping event due to parsing error: {e}")
+
+    # Send notifications per channel
+    for channel_id, items in per_channel.items():
+        channel = await _resolve_channel(channel_id)
+        if not channel:
+            print(f"❌ Discord channel ID {channel_id} not found for ending-soon alerts.")
+            continue
+
+        # Sort by end time ascending
+        items.sort(key=lambda pair: pair[1])
+
+        header = f"## Activities ending within {hours} hour(s)\n\n"
+        current_msg = header
+        chunks = []
+
+        for event, _end in items:
+            block = _format_event_block(event, now_bkk)
+            if len(current_msg) + len(block) > DISCORD_MESSAGE_LIMIT:
+                chunks.append(current_msg.rstrip())
+                current_msg = block
+            else:
+                current_msg += block
+
+        if current_msg.strip():
+            chunks.append(current_msg.rstrip())
+
+        for content in chunks:
+            try:
+                await channel.send(content)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"❌ Failed sending ending-soon alert to channel {channel_id}: {e}")
+
+        # Mark as notified
+        for key, ts in per_channel_keys.get(channel_id, []):
+            _NOTIFIED_END_ALERTS[key] = ts
+
+
 # Fetch and send only events that have not ended yet
 async def send_event_notifications():
     now_utc = datetime.datetime.now(datetime.timezone.utc)
@@ -243,7 +347,9 @@ async def on_ready():
     print(f"✅ Logged in as {client.user}")
     if not check_calendar.is_running():
         check_calendar.start()
-    
+    await notify_before_event_end(24)
+    await notify_before_event_end(12)
+    await notify_before_event_end(1)
     await send_event_notifications()  # Send notifications immediately on startup for testing
     await asyncio.sleep(1)
 
