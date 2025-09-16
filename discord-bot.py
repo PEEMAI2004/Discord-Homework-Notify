@@ -33,45 +33,21 @@ if not CALENDAR_MAP:
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-async def format_and_send_event(event, now, channel):
-    try:
-        bangkok_tz = ZoneInfo("Asia/Bangkok")
-        event_end = event.end.astimezone(bangkok_tz) if event.end else None
-        event_time = event_end.strftime('%B %d, %Y at %I:%M %p') if event_end else "All day"
-
-        if event_end:
-            time_until = event_end - now.astimezone(bangkok_tz)
-            total_seconds = time_until.total_seconds()
-
-            if total_seconds > 0:
-                days, remainder = divmod(total_seconds, 86400)
-                hours, remainder = divmod(remainder, 3600)
-                minutes = remainder // 60
-                time_until_str = f"{int(days)} days, {int(hours)} hours, and {int(minutes)} minutes"
-            else:
-                time_until_str = "Already ended"
-        else:
-            time_until_str = "N/A"
-            
-        description = event.description if hasattr(event, 'description') else "No description available"
-        class_id = description.split(",")[0] if description else "Unknown Class"
-        activity_id = description.split(",")[1] if len(description.split(",")) > 1 else "Unknown Activity"
-        # link to the event
-        baselink = os.getenv("BASE_SITE_URL").rstrip('/')
-        activity_link = f"{baselink}/{class_id}/activity/{activity_id}"
-        
-        msg = (
-            f"### {event.summary}\n"
-            f"📆 **Ends At:** {event_time}\n"
-            f"⏳ **Time Until End:** {time_until_str}\n"
-            f"🔗 [Link to Activity](<{activity_link}>)\n"
-        )
-        await channel.send(msg)
-        await asyncio.sleep(1)  # Avoid rate limits
-    except Exception as e:
-        print(f"❌ Error sending event '{event.summary}': {e}")
-
 async def format_and_send_events(events, now, channel):
+    # Hold message IDs to delete later
+    global sent_message_ids
+    if 'sent_message_ids' not in globals():
+        sent_message_ids = []
+    # Delete previous messages
+    for msg_id in sent_message_ids:
+        try:
+            msg = await channel.fetch_message(msg_id)
+            await msg.delete()
+            await asyncio.sleep(1)  # Avoid rate limits
+        except Exception as e:
+            print(f"⚠️ Could not delete message ID {msg_id}: {e}")
+    sent_message_ids.clear()
+
     try:
         bangkok_tz = ZoneInfo("Asia/Bangkok")
         msg = "## Activities\n\n"
@@ -80,7 +56,7 @@ async def format_and_send_events(events, now, channel):
         # Iterate through sorted events
         for event in events:
             event_end = event.end.astimezone(bangkok_tz) if event.end else None
-            event_time = event_end.strftime('%B %d, %Y at %I:%M %p') if event_end else "All day"
+            event_time = event_end.strftime('%d/%m/%y %H:%M') if event_end else "All day"
 
             if event_end:
                 time_until = event_end - now.astimezone(bangkok_tz)
@@ -90,7 +66,7 @@ async def format_and_send_events(events, now, channel):
                     days, remainder = divmod(total_seconds, 86400)
                     hours, remainder = divmod(remainder, 3600)
                     minutes = remainder // 60
-                    time_until_str = f"{int(days)} days, {int(hours)} hours, and {int(minutes)} minutes"
+                    time_until_str = f"{int(days)} d, {int(hours)} hr, and {int(minutes)} min"
                 else:
                     time_until_str = "Already ended"
             else:
@@ -105,51 +81,26 @@ async def format_and_send_events(events, now, channel):
             
             msg_check_point = msg
             msg += (
-                f"### {event.summary}\n"
-                f"📆 **Ends At:** {event_time}\n"
-                f"⏳ **Time Until End:** {time_until_str}\n"
-                f"🔗 [Link to Activity](<{activity_link}>)\n"
+                f"### [{event.summary}](<{activity_link}>)\n"
+                f"📆 {event_time}\n"
+                f"⏳ {time_until_str}\n"
             )
             if len(msg) > 2000:  # Discord message limit
-                await channel.send(msg_check_point)
+                sent_msg = await channel.send(msg_check_point)
                 msg = (
-                f"### {event.summary}\n"
-                f"📆 **Ends At:** {event_time}\n"
-                f"⏳ **Time Until End:** {time_until_str}\n"
-                f"🔗 [Link to Activity](<{activity_link}>)\n"
+                f"### [{event.summary}](<{activity_link}>)\n"
+                f"📆 {event_time}\n"
+                f"⏳ {time_until_str}\n"
                 )
+                sent_msg = await channel.send(msg)
+                sent_message_ids.append(sent_msg.id)
         
-        await channel.send(msg)
+        sent_msg = await channel.send(msg)
+        sent_message_ids.append(sent_msg.id)
         await asyncio.sleep(1)  # Avoid rate limits
     except Exception as e:
         print(f"❌ Error sending event '{event.summary}': {e}")
 
-# Fetch and send all today's events
-async def send_event_notifications_today():
-    now = datetime.datetime.now(datetime.timezone.utc)
-    today = now.date()
-    print(f"🔎 Checking calendars at {now.isoformat()}")
-
-    for calendar_id, channel_id in CALENDAR_MAP.items():
-        try:
-            gc = GoogleCalendar(calendar_id, credentials_path=GOOGLE_CREDENTIALS)
-            events = list(gc.get_events(time_min=today, time_max=today + datetime.timedelta(days=1)))
-
-            if not events:
-                print(f"📭 No events today for calendar {calendar_id}")
-                continue
-
-            channel = client.get_channel(channel_id)
-            if not channel:
-                print(f"❌ Discord channel ID {channel_id} not found.")
-                continue
-
-            print(f"📡 Sending {len(events)} event(s) for calendar {calendar_id} to channel {channel.name} ({channel_id})")
-            for event in events:
-                await format_and_send_event(event, now, channel)
-
-        except Exception as e:
-            print(f"❌ Error processing calendar {calendar_id}: {e}")
 
 # Fetch and send only events that have not ended yet
 async def send_event_notifications():
@@ -208,7 +159,7 @@ async def check_calendar():
 # On bot ready
 @client.event
 async def on_ready():
-    get_activities()
+    # get_activities()
     print(f"✅ Logged in as {client.user}")
     if not check_calendar.is_running():
         check_calendar.start()
