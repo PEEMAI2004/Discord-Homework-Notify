@@ -114,7 +114,9 @@ def load_class_info():
     else:
         print("❌ CLASS_INFO not found in environment variables")
         exit(1)
-
+    # Skip class id 1234567
+    if 1234567 in class_names:
+        del class_names[1234567]
     print(f"📋 Loaded {len(class_names)} classes from environment variables")
     return class_names
 

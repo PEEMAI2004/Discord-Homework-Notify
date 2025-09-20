@@ -7,7 +7,7 @@ from gcsa.google_calendar import GoogleCalendar
 from dotenv import load_dotenv
 import os
 from zoneinfo import ZoneInfo
-from api_bot import get_activities
+from api_bot import get_activities, add_or_update_event, google_calendar_service
 
 # Load environment variables
 load_dotenv()
@@ -39,6 +39,33 @@ DISCORD_MESSAGE_LIMIT = 2000
 _PREV_MESSAGE_IDS = {}
 # Track which events we've already notified about for end-time alerts
 _NOTIFIED_END_ALERTS = {}
+
+
+def _create_test_event(hoursuntillend=1):
+    """Create or refresh a calendar event that confirms write access."""
+    try:
+        calendar_id = os.getenv("GOOGLE_CALENDAR_ID")
+        if not calendar_id:
+            print("⚠️ Cannot create test event: GOOGLE_CALENDAR_ID is missing.")
+            return
+
+        service = google_calendar_service()
+        now_bkk = datetime.datetime.now(BANGKOK_TZ).replace(microsecond=0)
+        start = now_bkk.isoformat()
+        end = (now_bkk + datetime.timedelta(minutes=hoursuntillend*60+2)).isoformat()
+
+        add_or_update_event(
+            service,
+            calendar_id,
+            f"[TEST] Discord Bot Connectivity Check {hoursuntillend}",
+            start,
+            end,
+            "1234567",
+            "hoursuntillend",
+        )
+        print("🧪 Test event creation attempted; check calendar for '[TEST] Discord Bot Connectivity Check'.")
+    except Exception as e:
+        print(f"⚠️ Failed to create test event: {e}")
 
 
 def _safe_event_end_in_bkk(event):
@@ -343,6 +370,9 @@ async def check_calendar():
 # On bot ready
 @client.event
 async def on_ready():
+    # For Testing
+    _create_test_event()
+
     # get_activities()
     print(f"✅ Logged in as {client.user}")
     if not check_calendar.is_running():
