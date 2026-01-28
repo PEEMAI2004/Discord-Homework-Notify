@@ -1,8 +1,8 @@
 import discord
+from discord.ext import commands, tasks
 import asyncio
 import datetime
 from datetime import time as dtime
-from discord.ext import tasks
 from gcsa.google_calendar import GoogleCalendar
 from dotenv import load_dotenv
 import os
@@ -12,6 +12,7 @@ from api_bot import get_activities
 # Load environment variables
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")  # Optional: for faster command sync during testing
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS_PATH")
 GCSA_TOKEN_PATH = os.getenv("GCSA_TOKEN_PATH", "/home/kamin/.credentials/token.pickle")  # Default path for gcsa token
 DISCORD_BOT_STATUS_CHANEL = os.getenv("DISCORD_BOT_STATUS_CHANEL")
@@ -30,9 +31,10 @@ except Exception as e:
 if not CALENDAR_MAP:
     print("⚠️ No valid calendar-channel mappings found in CALENDAR_MAP.")
 
-# Initialize Discord bot
+# Initialize Discord bot with commands support
 intents = discord.Intents.default()
-client = discord.Client(intents=intents)
+intents.message_content = True  # Required for commands
+client = commands.Bot(command_prefix='/', intents=intents)
 
 # Constants and state for message handling
 BANGKOK_TZ = ZoneInfo("Asia/Bangkok")
@@ -263,6 +265,60 @@ async def send_startup_message():
         print(f"❌ Error sending startup message to status channel {DISCORD_BOT_STATUS_CHANEL}: {e}")
 
 
+# Discord Application Commands (Slash Commands)
+
+@client.tree.command(name="fetch", description="Fetch activities from external API to Google Calendar")
+async def fetch(interaction: discord.Interaction):
+    """Fetch activities to calendar - only works in mapped channels"""
+    # Check if command is used in a mapped channel
+    if interaction.channel.id not in CALENDAR_MAP.values():
+        await interaction.response.send_message("❌ This command can only be used in homework notification channels.", ephemeral=True)
+        return
+    
+    await interaction.response.send_message("🔄 Fetching activities from external API...")
+    
+    try:
+        # Run get_activities in a thread to avoid blocking
+        await asyncio.to_thread(get_activities)
+        await interaction.followup.send("✅ Successfully fetched and updated activities in Google Calendar!")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error fetching activities: {e}")
+        print(f"❌ Error in /fetch command: {e}")
+
+
+@client.tree.command(name="homework", description="Send homework notifications for this channel")
+async def homework(interaction: discord.Interaction):
+    """Notify homework for this channel - only works in mapped channels"""
+    # Check if command is used in a mapped channel
+    if interaction.channel.id not in CALENDAR_MAP.values():
+        await interaction.response.send_message("❌ This command can only be used in homework notification channels.", ephemeral=True)
+        return
+    
+    # Find the calendar ID for this channel
+    calendar_id = None
+    for cal_id, chan_id in CALENDAR_MAP.items():
+        if chan_id == interaction.channel.id:
+            calendar_id = cal_id
+            break
+    
+    if not calendar_id:
+        await interaction.response.send_message("❌ No calendar mapping found for this channel.", ephemeral=True)
+        return
+    
+    await interaction.response.send_message("📚 Fetching homework notifications...")
+    
+    try:
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_bkk = now_utc.astimezone(BANGKOK_TZ)
+        
+        # Process just this channel's calendar
+        await _process_calendar(calendar_id, interaction.channel.id, now_utc, now_bkk)
+        await interaction.followup.send("✅ Homework notifications sent!")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error sending homework notifications: {e}")
+        print(f"❌ Error in /homework command: {e}")
+
+
 # Daily 9AM loop
 @tasks.loop(time=dtime(9, 0))
 async def check_calendar():
@@ -274,11 +330,27 @@ async def check_calendar():
 async def on_ready():
 
     print(f"✅ Logged in as {client.user}")
+    
+    # Sync slash commands with Discord
+    try:
+        if DISCORD_GUILD_ID:
+            # Guild-specific sync (instant updates, recommended for testing)
+            guild = discord.Object(id=int(DISCORD_GUILD_ID))
+            client.tree.copy_global_to(guild=guild)
+            synced = await client.tree.sync(guild=guild)
+            print(f"🔄 Synced {len(synced)} command(s) to guild {DISCORD_GUILD_ID} (instant)")
+        else:
+            # Global sync (takes up to 1 hour to propagate)
+            synced = await client.tree.sync()
+            print(f"🔄 Synced {len(synced)} command(s) globally (may take up to 1 hour)")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
+    
     if not check_calendar.is_running():
         check_calendar.start()
     
     await send_startup_message()
-    get_activities()
+    # get_activities()
     await send_event_notifications()
     await asyncio.sleep(1)
 
