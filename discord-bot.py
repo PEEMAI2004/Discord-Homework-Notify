@@ -13,6 +13,8 @@ from api_bot import get_activities
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS_PATH")
+GCSA_TOKEN_PATH = os.getenv("GCSA_TOKEN_PATH", "/home/kamin/.credentials/token.pickle")  # Default path for gcsa token
+DISCORD_BOT_STATUS_CHANEL = os.getenv("DISCORD_BOT_STATUS_CHANEL")
 print(f"🔑 Using Google credentials from {GOOGLE_CREDENTIALS}")
 
 # Parse CALENDAR_MAP from environment
@@ -183,7 +185,7 @@ async def send_event_notifications():
 
 async def _process_calendar(calendar_id, channel_id, now_utc, now_bkk):
     try:
-        gc = GoogleCalendar(calendar_id, credentials_path=GOOGLE_CREDENTIALS)
+        gc = GoogleCalendar(calendar_id, credentials_path=GOOGLE_CREDENTIALS, token_path=GCSA_TOKEN_PATH)
         events = list(gc.get_events(time_min=now_utc))
 
         if not events:
@@ -229,22 +231,55 @@ async def _resolve_channel(channel_id):
         print(f"⚠️ fetch_channel failed for {channel_id}: {e}")
         return None
 
+async def send_startup_message():
+    """Send a startup message to all configured channels."""
+    now_bkk = datetime.datetime.now(BANGKOK_TZ)
+    startup_time = now_bkk.strftime("%d/%m/%Y %H:%M:%S")
+    
+    print(f"📢 Sending startup message to status channel")
+    
+    try:
+        channel = await _resolve_channel(int(DISCORD_BOT_STATUS_CHANEL))
+        if not channel:
+            print(f"❌ Could not find status channel {DISCORD_BOT_STATUS_CHANEL} for startup message")
+            return
+        
+        # Build list of monitored calendars
+        calendar_list = "\n".join([f"  • `{cal_id}`" for cal_id in CALENDAR_MAP.keys()])
+        
+        message = (
+            f"🤖 **Bot Online**\n\n"
+            f"✅ Discord Homework Notify bot is now running!\n"
+            f"⏰ Started at: {startup_time} (Bangkok Time)\n\n"
+            f"📅 Monitoring {len(CALENDAR_MAP)} calendar(s):\n{calendar_list}\n\n"
+            f"🔔 Daily notifications at 9:00 AM Bangkok time\n"
+        )
+        
+        await channel.send(message)
+        print(f"✉️ Startup message sent to channel {channel.name} ({DISCORD_BOT_STATUS_CHANEL})")
+        await asyncio.sleep(0.5)  # Rate limit protection
+        
+    except Exception as e:
+        print(f"❌ Error sending startup message to status channel {DISCORD_BOT_STATUS_CHANEL}: {e}")
+
+
 # Daily 9AM loop
 @tasks.loop(time=dtime(9, 0))
 async def check_calendar():
-    # await send_event_notifications_today()
     get_activities()
     await send_event_notifications()
 
 # On bot ready
 @client.event
 async def on_ready():
-    # get_activities()
+
     print(f"✅ Logged in as {client.user}")
     if not check_calendar.is_running():
         check_calendar.start()
     
-    await send_event_notifications()  # Send notifications immediately on startup for testing
+    await send_startup_message()
+    get_activities()
+    await send_event_notifications()
     await asyncio.sleep(1)
 
 # Run the bot

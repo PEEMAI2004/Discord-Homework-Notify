@@ -7,8 +7,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
-from google.oauth2 import service_account
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+# from google.oauth2 import service_account
+# from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 load_dotenv()
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
@@ -20,41 +20,41 @@ ACCOUNT_TYPE = os.getenv("GOOGLE_ACCOUNT_TYPE", "service_account").lower()
 
 def google_calendar_service():
     creds = None
-    if ACCOUNT_TYPE == "service_account":
-        # Fallback to service account
+    # if ACCOUNT_TYPE == "service_account":
+    #     # Fallback to service account
+    #     try:
+    #         creds = service_account.Credentials.from_service_account_file(
+    #             GOOGLE_CREDENTIALS, scopes=SCOPES
+    #         )
+    #         print("✅ Service account credentials loaded from", GOOGLE_CREDENTIALS)
+    #         return build('calendar', 'v3', credentials=creds)
+    #     except Exception as e:
+    #         print("❌ Failed to load service account credentials:", e)
+    # else:
+    # Try user token
+    if os.path.exists(Token_Path):
         try:
-            creds = service_account.Credentials.from_service_account_file(
-                GOOGLE_CREDENTIALS, scopes=SCOPES
-            )
-            print("✅ Service account credentials loaded from", GOOGLE_CREDENTIALS)
-            return build('calendar', 'v3', credentials=creds)
+            creds = Credentials.from_authorized_user_file(Token_Path, SCOPES)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                print("🔄 Access token refreshed.")
+            if creds and creds.valid:
+                print("✅ Token loaded successfully from user credentials at", Token_Path)
+                return build('calendar', 'v3', credentials=creds)
+            else:
+                print("❌ Token is invalid or expired without refresh token.")
         except Exception as e:
-            print("❌ Failed to load service account credentials:", e)
-    else:
-        # Try user token
-        if os.path.exists(Token_Path):
-            try:
-                creds = Credentials.from_authorized_user_file(Token_Path, SCOPES)
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                    print("🔄 Access token refreshed.")
-                if creds and creds.valid:
-                    print("✅ Token loaded successfully from user credentials at", Token_Path)
-                    return build('calendar', 'v3', credentials=creds)
-                else:
-                    print("❌ Token is invalid or expired without refresh token.")
-            except Exception as e:
-                print("❌ Failed to load user token:", e)
+            print("❌ Failed to load user token:", e)
 
-        # Final fallback — prompt user login
-        print("🔓 Prompting for manual authentication...")
-        flow = InstalledAppFlow.from_client_secrets_file(GOOGLE_CREDENTIALS, SCOPES)
-        creds = flow.run_local_server(port=0)
-        with open(Token_Path, 'w') as token:
-            token.write(creds.to_json())
-        print("✅ Token saved to", Token_Path)
+    # Final fallback — prompt user login
+    print("🔓 Prompting for manual authentication...")
+    flow = InstalledAppFlow.from_client_secrets_file(GOOGLE_CREDENTIALS, SCOPES)
+    creds = flow.run_local_server(port=0)
+    with open(Token_Path, 'w') as token:
+        token.write(creds.to_json())
+    print("✅ Token saved to", Token_Path)
 
-        return build('calendar', 'v3', credentials=creds)
+    return build('calendar', 'v3', credentials=creds)
 
 
 def find_event_by_id(service, calendar_id, event_id):

@@ -1,0 +1,21 @@
+services:
+  discord-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: discord-homework-bot
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Bangkok
+    env_file:
+      - .env
+    volumes:
+      # Mount Google credentials file at the same path as host
+      - ${GOOGLE_CREDENTIALS_PATH}:${GOOGLE_CREDENTIALS_PATH}:ro
+      - ${GOOGLE_TOKEN_PATH}:${GOOGLE_TOKEN_PATH}:ro
+      - ${GCSA_TOKEN_PATH}:${GCSA_TOKEN_PATH}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
