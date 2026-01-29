@@ -16,7 +16,11 @@ DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")  # Optional: for faster command
 GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS_PATH")
 GCSA_TOKEN_PATH = os.getenv("GCSA_TOKEN_PATH", "/home/kamin/.credentials/token.pickle")  # Default path for gcsa token
 DISCORD_BOT_STATUS_CHANEL = os.getenv("DISCORD_BOT_STATUS_CHANEL")
+FETCH_ON_START = os.getenv("FETCH_ON_START", "true").lower() == "true"  # Whether to fetch API on startup
+FETCH_AT_9AM = os.getenv("FETCH_AT_9AM", "true").lower() == "true"  # Whether to run scheduled fetch at 9AM
 print(f"🔑 Using Google credentials from {GOOGLE_CREDENTIALS}")
+print(f"⚙️ FETCH_ON_START: {FETCH_ON_START}")
+print(f"⚙️ FETCH_AT_9AM: {FETCH_AT_9AM}")
 
 # Parse CALENDAR_MAP from environment
 try:
@@ -322,7 +326,11 @@ async def homework(interaction: discord.Interaction):
 # Daily 9AM loop
 @tasks.loop(time=dtime(9, 0))
 async def check_calendar():
-    get_activities()
+    if FETCH_AT_9AM:
+        print("🔄 Running scheduled 9AM fetch...")
+        get_activities()
+    else:
+        print("⏭️ Skipping 9AM fetch (FETCH_AT_9AM=false)")
     await send_event_notifications()
 
 # On bot ready
@@ -350,7 +358,13 @@ async def on_ready():
         check_calendar.start()
     
     await send_startup_message()
-    # get_activities()
+    
+    if FETCH_ON_START:
+        print("🚀 Running startup fetch (FETCH_ON_START=true)...")
+        get_activities()
+    else:
+        print("⏭️ Skipping startup fetch (FETCH_ON_START=false)")
+    
     await send_event_notifications()
     await asyncio.sleep(1)
 
